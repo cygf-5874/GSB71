@@ -33,21 +33,6 @@ func cloneTree(v any) any {
 	return v
 }
 
-// collectLeafPaths 深度优先收集 v 底下的叶子路径，追加到 out。
-// 对象向下展开；标量与数组算叶子；nil 不产生路径。
-func collectLeafPaths(v any, prefix string, out *[]string) {
-	if v == nil {
-		return
-	}
-	if m, ok := asObject(v); ok {
-		for k, child := range m {
-			collectLeafPaths(child, appendSegment(prefix, k), out)
-		}
-		return
-	}
-	*out = append(*out, prefix)
-}
-
 // ParsePath 把点路径切成路径段。
 //
 // 文法：seg ('.' seg)*，其中 seg 是
