@@ -12,7 +12,6 @@ package layercfg
 //	port, _ := s.Lookup("app.port") // 9090
 type Store struct {
 	layers []Layer
-	tree   map[string]any
 }
 
 // NewStore 建一个空 Store。
@@ -25,33 +24,25 @@ func (s *Store) Add(l Layer) {
 
 // Snapshot 合并当前各层并返回快照。
 func (s *Store) Snapshot() *Snapshot {
-	s.tree = buildTree(s.layers)
-	return &Snapshot{store: s}
+	return &Snapshot{layers: highPriorityLayers(s.layers)}
 }
 
 // Merge 合并给定各层并返回快照；靠前的层优先级低，靠后的层优先级高。
 func Merge(layers ...Layer) *Snapshot {
-	st := NewStore()
-	for _, l := range layers {
-		st.Add(l)
-	}
-	return st.Snapshot()
+	return &Snapshot{layers: highPriorityLayers(layers)}
 }
 
-// buildTree 逐层合并出整棵配置树：每合一层，都把现有整棵树深拷贝一份再合上去。
-func buildTree(layers []Layer) map[string]any {
-	out := map[string]any{}
-	for _, l := range layers {
-		cloned, _ := cloneTree(out).(map[string]any)
-		mergeLayer(cloned, l)
-		out = cloned
+func highPriorityLayers(layers []Layer) []Layer {
+	out := make([]Layer, len(layers))
+	for i, l := range layers {
+		out[len(layers)-1-i] = l
 	}
 	return out
 }
 
 // Snapshot 是某一时刻合并结果的只读视图。
 type Snapshot struct {
-	store *Store
+	layers []Layer
 }
 
 // Lookup 按点路径查找叶子值。
@@ -63,23 +54,21 @@ func (s *Snapshot) Lookup(path string) (any, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var cur any = s.store.tree
+
+	frames := s.layers
 	for i, seg := range segs {
-		m, ok := asObject(cur)
-		if !ok {
+		next, value, exists := resolveKey(frames, seg)
+		if !exists {
 			return nil, false
 		}
-		v, ok := m[seg]
-		if !ok || v == nil {
+		if len(next) > 0 {
+			frames = next
+			continue
+		}
+		if i != len(segs)-1 || value == nil {
 			return nil, false
 		}
-		if i == len(segs)-1 {
-			if _, isObj := asObject(v); isObj {
-				return nil, false
-			}
-			return v, true
-		}
-		cur = v
+		return value, true
 	}
 	return nil, false
 }
@@ -87,8 +76,6 @@ func (s *Snapshot) Lookup(path string) (any, bool) {
 // Keys 返回全部叶子路径。
 func (s *Snapshot) Keys() []string {
 	var out []string
-	for k, v := range s.store.tree {
-		collectLeafPaths(v, appendSegment("", k), &out)
-	}
+	collectLeafPaths(s.layers, "", &out)
 	return out
 }

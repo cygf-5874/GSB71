@@ -1,6 +1,9 @@
 package layercfg
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Layer 是一层配置。Layer 是 map[string]any 的别名：
 // 对象一律写成 map[string]any（也就是 Layer），数组写成 []any，
@@ -33,19 +36,34 @@ func cloneTree(v any) any {
 	return v
 }
 
-// collectLeafPaths 深度优先收集 v 底下的叶子路径，追加到 out。
+// collectLeafPaths 深度优先收集虚拟合并树底下的叶子路径，追加到 out。
 // 对象向下展开；标量与数组算叶子；nil 不产生路径。
-func collectLeafPaths(v any, prefix string, out *[]string) {
-	if v == nil {
-		return
-	}
-	if m, ok := asObject(v); ok {
-		for k, child := range m {
-			collectLeafPaths(child, appendSegment(prefix, k), out)
+func collectLeafPaths(frames []Layer, prefix string, out *[]string) {
+	seen := map[string]bool{}
+	for _, frame := range frames {
+		for key := range frame {
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
+			childFrames, value, exists := resolveKey(frames, key)
+			if !exists {
+				continue
+			}
+			path := appendSegment(prefix, key)
+			if len(childFrames) > 0 {
+				collectLeafPaths(childFrames, path, out)
+				continue
+			}
+			if value != nil {
+				*out = append(*out, path)
+			}
 		}
-		return
 	}
-	*out = append(*out, prefix)
+	if prefix == "" {
+		sort.Strings(*out)
+	}
 }
 
 // ParsePath 把点路径切成路径段。
@@ -79,6 +97,9 @@ func ParsePath(path string) ([]string, error) {
 					if j+1 >= len(path) {
 						return nil, ErrBadPath
 					}
+					if next := path[j+1]; next != '"' && next != '\\' {
+						return nil, ErrBadPath
+					}
 					b.WriteByte(path[j+1])
 					j += 2
 					continue
@@ -95,6 +116,9 @@ func ParsePath(path string) ([]string, error) {
 				return nil, ErrBadPath
 			}
 			seg = b.String()
+			if seg == "" {
+				return nil, ErrBadPath
+			}
 			i = j + 1
 		} else {
 			j := i

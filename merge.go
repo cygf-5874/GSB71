@@ -1,23 +1,34 @@
 package layercfg
 
-// mergeLayer 把 src 这一层合并进 dst，dst 被原地改写。
+// resolveKey 返回 key 在一组同路径层中的最高优先级结果。
 //
-// 规则：高优先级覆盖低优先级；两边都是对象时逐键递归；
-// 数组整体替换（不逐元素合并）；nil 是删除标记。
-func mergeLayer(dst map[string]any, src map[string]any) {
-	for k, v := range src {
-		if v == nil {
-			// nil 是删除标记：这个键彻底消失，不在两边留痕迹。
-			delete(src, k)
-			delete(dst, k)
+// frames 按优先级从高到低排列。若最高值是对象，返回值是仍需递归合并的
+// 对象层；否则返回标量、数组或 nil 删除标记。对象会挡住更低层的非对象，
+// 因而低层对象只在它与更高层对象之间没有非对象屏障时参与合并。
+func resolveKey(frames []Layer, key string) ([]Layer, any, bool) {
+	for i, frame := range frames {
+		value, ok := frame[key]
+		if !ok {
 			continue
 		}
-		if sm, ok := asObject(v); ok {
-			if dm, ok := asObject(dst[k]); ok {
-				mergeLayer(dm, sm)
+		object, ok := asObject(value)
+		if !ok {
+			return nil, value, true
+		}
+
+		objects := []Layer{object}
+		for _, lower := range frames[i+1:] {
+			lowerValue, ok := lower[key]
+			if !ok {
 				continue
 			}
+			if lowerObject, ok := asObject(lowerValue); ok {
+				objects = append(objects, lowerObject)
+			} else {
+				break
+			}
 		}
-		dst[k] = cloneTree(v)
+		return objects, nil, true
 	}
+	return nil, nil, false
 }
